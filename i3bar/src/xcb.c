@@ -77,6 +77,12 @@ static mode binding;
 /* Indicates whether a new binding mode was recently activated */
 bool activated_mode = false;
 
+/* The current layer */
+static layer current_layer;
+
+/* Indicates whether a new layer was recently activated */
+bool activated_layer = false;
+
 /* The output in which the tray should be displayed. */
 static i3_output *output_for_tray;
 
@@ -103,6 +109,18 @@ struct xcb_colors_t {
     color_t binding_mode_bg;
     color_t binding_mode_fg;
     color_t binding_mode_border;
+    color_t layer_bg;
+    color_t layer_fg;
+    color_t layer_border;
+    color_t focus_ws_layer_bg;
+    color_t focus_ws_layer_fg;
+    color_t focus_ws_layer_border;
+    color_t active_ws_layer_bg;
+    color_t active_ws_layer_fg;
+    color_t active_ws_layer_border;
+    color_t inactive_ws_layer_bg;
+    color_t inactive_ws_layer_fg;
+    color_t inactive_ws_layer_border;
 };
 struct xcb_colors_t colors;
 
@@ -407,6 +425,18 @@ void init_colors(const struct xcb_color_strings_t *new_colors) {
     PARSE_COLOR(focus_ws_fg, "#FFFFFF");
     PARSE_COLOR(focus_ws_bg, "#285577");
     PARSE_COLOR(focus_ws_border, "#4c7899");
+    PARSE_COLOR(layer_fg, "#000000");
+    PARSE_COLOR(layer_bg, "#ADFF2F");
+    PARSE_COLOR(layer_border, "#9ACD32");
+    PARSE_COLOR(focus_ws_layer_fg, "#FFFFFF");
+    PARSE_COLOR(focus_ws_layer_bg, "#36772F");
+    PARSE_COLOR(focus_ws_layer_border, "#2F6729");
+    PARSE_COLOR(active_ws_layer_fg, "#FFFFFF");
+    PARSE_COLOR(active_ws_layer_bg, "#779D72");
+    PARSE_COLOR(active_ws_layer_border, "#35492C");
+    PARSE_COLOR(inactive_ws_layer_fg, "#BEBEBE");
+    PARSE_COLOR(inactive_ws_layer_bg, "#779D72");
+    PARSE_COLOR(inactive_ws_layer_border, "#35492C");
 #undef PARSE_COLOR
 
 #define PARSE_COLOR_FALLBACK(name, fallback)                                                         \
@@ -2023,15 +2053,35 @@ void draw_bars(bool unhide) {
                 color_t fg_color = colors.inactive_ws_fg;
                 color_t bg_color = colors.inactive_ws_bg;
                 color_t border_color = colors.inactive_ws_border;
+
+                int is_layer = current_layer.name && ws_walk->num >= current_layer.from && ws_walk->num <= current_layer.to;
+                if (is_layer) {
+                    fg_color = colors.inactive_ws_layer_fg;
+                    bg_color = colors.inactive_ws_layer_bg;
+                    border_color = colors.inactive_ws_layer_border;
+                }
+
                 if (ws_walk->visible) {
                     if (!ws_walk->focused) {
-                        fg_color = colors.active_ws_fg;
-                        bg_color = colors.active_ws_bg;
-                        border_color = colors.active_ws_border;
+                        if (!is_layer) {
+                            fg_color = colors.active_ws_fg;
+                            bg_color = colors.active_ws_bg;
+                            border_color = colors.active_ws_border;
+                        } else {
+                            fg_color = colors.active_ws_layer_fg;
+                            bg_color = colors.active_ws_layer_bg;
+                            border_color = colors.active_ws_layer_border;
+                        }
                     } else {
-                        fg_color = colors.focus_ws_fg;
-                        bg_color = colors.focus_ws_bg;
-                        border_color = colors.focus_ws_border;
+                        if (!is_layer) {
+                            fg_color = colors.focus_ws_fg;
+                            bg_color = colors.focus_ws_bg;
+                            border_color = colors.focus_ws_border;
+                        } else {
+                            fg_color = colors.focus_ws_layer_fg;
+                            bg_color = colors.focus_ws_layer_bg;
+                            border_color = colors.focus_ws_layer_border;
+                        }
                     }
                 }
                 if (ws_walk->urgent) {
@@ -2050,6 +2100,17 @@ void draw_bars(bool unhide) {
                 if (TAILQ_NEXT(ws_walk, tailq) != NULL)
                     workspace_width += logical_px(ws_spacing_px);
             }
+        }
+
+        if (current_layer.name) {
+            workspace_width += logical_px(ws_spacing_px);
+
+            int w = predict_button_width(current_layer.name_width);
+            draw_button(&(outputs_walk->buffer), colors.layer_fg, colors.layer_bg,
+                        colors.layer_border, workspace_width, w, current_layer.name_width, current_layer.name);
+
+            unhide = true;
+            workspace_width += w;
         }
 
         if (binding.name && !config.disable_binding_mode_indicator) {
@@ -2130,4 +2191,14 @@ void set_current_mode(struct mode *current) {
     I3STRING_FREE(binding.name);
     binding = *current;
     activated_mode = binding.name != NULL;
+}
+
+/*
+ * Set the current layer
+ *
+ */
+void set_current_layer(layer *current) {
+    // free the old layer name
+    I3STRING_FREE(current_layer.name);
+    current_layer = *current;
 }

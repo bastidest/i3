@@ -14,6 +14,8 @@
 #include <stdint.h>
 #include <unistd.h>
 
+static struct Layer *current_layer = NULL;
+
 // Macros to make the YAJL API a bit easier to use.
 #define y(x, ...) (cmd_output->json_gen != NULL ? yajl_gen_##x(cmd_output->json_gen, ##__VA_ARGS__) : 0)
 #define ystr(str) (cmd_output->json_gen != NULL ? yajl_gen_string(cmd_output->json_gen, (unsigned char *)str, strlen(str)) : 0)
@@ -386,9 +388,26 @@ void cmd_move_con_to_workspace_number(I3_CMD, const char *which, const char *no_
         return;
     }
 
+    if (current_layer != NULL) {
+        long old_num = parsed_num;
+        // from = 11; to = 20 --> 10 would be the last absoulte ws
+        int last_absolute_ws_num = current_layer->to - current_layer->from + 1;
+        if (parsed_num <= last_absolute_ws_num) {
+            // the switch has to be mapped to the current layer -> add from
+            parsed_num += current_layer->from - 1;
+        } else if (parsed_num >= current_layer->from && parsed_num <= current_layer->to) {
+            // the switch has to be mapped to the default layer -> subtract from
+            parsed_num -= current_layer->from - 1;
+        }
+        DLOG("layer \"%s\": mapping %ld to %ld\n", current_layer->name, old_num, parsed_num);
+    }
+
     Con *ws = get_existing_workspace_by_num(parsed_num);
     if (!ws) {
-        ws = workspace_get(which);
+        char *num_as_str;
+        sasprintf(&num_as_str, "%ld", parsed_num);
+        ws = workspace_get(num_as_str);
+        free(num_as_str);
     }
 
     if (no_auto_back_and_forth == NULL) {
@@ -894,11 +913,30 @@ void cmd_workspace_number(I3_CMD, const char *which, const char *_no_auto_back_a
         return;
     }
 
+    if (current_layer != NULL) {
+        long old_num = parsed_num;
+        // from = 11; to = 20 --> 10 would be the last absoulte ws
+        int last_absolute_ws_num = current_layer->to - current_layer->from + 1;
+        if (parsed_num <= last_absolute_ws_num) {
+            // the switch has to be mapped to the current layer -> add from
+            parsed_num += current_layer->from - 1;
+        } else if (parsed_num >= current_layer->from && parsed_num <= current_layer->to) {
+            // the switch has to be mapped to the default layer -> subtract from
+            parsed_num -= current_layer->from - 1;
+        }
+        DLOG("layer \"%s\": mapping %ld to %ld\n", current_layer->name, old_num, parsed_num);
+    }
+
     Con *workspace = get_existing_workspace_by_num(parsed_num);
     if (!workspace) {
         LOG("There is no workspace with number %ld, creating a new one.\n", parsed_num);
         ysuccess(true);
-        workspace_show_by_name(which);
+
+        char *num_as_str;
+        sasprintf(&num_as_str, "%ld", parsed_num);
+        workspace_show_by_name(num_as_str);
+        free(num_as_str);
+
         cmd_output->needs_tree_render = true;
         return;
     }
@@ -2180,6 +2218,52 @@ void cmd_bar_hidden_state(I3_CMD, const char *bar_hidden_state, const char *bar_
         /* We have already handled the case of no bars, so we must have
          * updated all active bars now. */
         ysuccess(true);
+    }
+}
+
+static void switch_layer(struct Layer *layer) {
+    current_layer = layer;
+    char *event_msg = "{\"name\":\"default\"}";
+
+    if (layer != NULL) {
+        sasprintf(&event_msg, "{\"name\":\"%s\", \"from\":%ld, \"to\":%ld}", layer->name, layer->from, layer->to);
+    }
+
+    ipc_send_event("layer", I3_IPC_EVENT_LAYER, event_msg);
+
+    if (layer != NULL) {
+        FREE(event_msg);
+    }
+}
+
+/*
+ * Implementation of 'layer <name>'
+ *
+ */
+void cmd_layer_name(I3_CMD, const char *layer_name) {
+    if (!strcmp(layer_name, "default")) {
+        switch_layer(NULL);
+        DLOG("Switched to layer \"default\"\n");
+        ysuccess(true);
+        return;
+    }
+
+    struct Layer *l, *layer_found = NULL;
+    TAILQ_FOREACH (l, &layers, layers) {
+        if (!strcmp(l->name, layer_name)) {
+            layer_found = l;
+            break;
+        }
+    }
+
+    if (layer_found != NULL) {
+        switch_layer(layer_found);
+        ysuccess(true);
+        return;
+    } else {
+        DLOG("Layer \"%s\" not found!\n", layer_name);
+        ysuccess(false);
+        return;
     }
 }
 

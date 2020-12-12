@@ -370,6 +370,17 @@ CFGFUN(workspace, const char *workspace, const char *output) {
     TAILQ_INSERT_TAIL(&ws_assignments, assignment, ws_assignments);
 }
 
+CFGFUN(layer, const char *name, const long from, const long to) {
+    struct Layer *layer;
+
+    layer = scalloc(1, sizeof(struct Layer));
+    layer->name = sstrdup(name);
+    layer->from = from;
+    layer->to = to;
+
+    TAILQ_INSERT_TAIL(&layers, layer, layers);
+}
+
 CFGFUN(ipc_socket, const char *path) {
     free(config.ipc_socket_path);
     config.ipc_socket_path = sstrdup(path);
